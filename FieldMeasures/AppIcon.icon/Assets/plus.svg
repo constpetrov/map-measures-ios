@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Plus badge overlapping the pin's lower right -->
+  <circle cx="700" cy="660" r="150" fill="#FFFFFF"/>
+  <rect x="680" y="570" width="40" height="180" rx="20" fill="#0A84FF"/>
+  <rect x="610" y="640" width="180" height="40" rx="20" fill="#0A84FF"/>
+</svg>

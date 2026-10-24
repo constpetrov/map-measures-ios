@@ -37,3 +37,14 @@ Debug builds read these launch arguments (Product › Scheme › Edit Scheme ›
 | `-FailSaves` | Every save fails, to check the "Could not save…" and "Could not delete point" alerts |
 | `-FailExportWrite` | Writing the export file fails, to check the "Could not create export file" alert |
 | `-SeedPoints 3000` | Fills an empty store with 3,000 points over the last 30 days near `-SeedCenter` (default Berlin) |
+
+## App icon
+
+`FieldMeasures/AppIcon.icon` is an Icon Composer document (open it in Xcode › Open Developer Tool › Icon Composer). It has three layers (map, marker, plus) over a gradient fill, with a dark background and a quieter map for dark mode. iOS 26+ renders it as Liquid Glass in all appearances, and Xcode generates flat images for iOS 17–25. `docs/app-icon-renditions.png` shows every appearance. To re-render it:
+
+```sh
+ictool FieldMeasures/AppIcon.icon --export-image --output-file Dark.png --platform iOS --rendition Dark \
+  --width 1024 --height 1024 --scale 1
+```
+
+(`ictool` is in `Icon Composer.app/Contents/Executables/`; renditions: Default, Dark, ClearLight, ClearDark, TintedLight, TintedDark.)

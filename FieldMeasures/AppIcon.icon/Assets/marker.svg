@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Map pin: round head with a point at (470, 800) -->
+  <path d="M470 800 C 410 700, 270 560, 270 430 A 200 200 0 1 1 670 430 C 670 560, 530 700, 470 800 Z" fill="#FF3B30"/>
+  <circle cx="470" cy="430" r="78" fill="#FFFFFF"/>
+</svg>
