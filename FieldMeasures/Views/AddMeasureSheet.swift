@@ -63,7 +63,7 @@ struct AddMeasureSheet: View {
             text: text
         )
         do {
-            try persistence.commit({ modelContext.insert(measure) }, in: modelContext)
+            try persistence.insert(measure, into: modelContext)
             dismiss()
         } catch {
             logger.error("Saving a new point failed: \(error.localizedDescription)")

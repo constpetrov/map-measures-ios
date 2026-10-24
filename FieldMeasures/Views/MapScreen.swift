@@ -1,4 +1,5 @@
 import MapKit
+import os
 import SwiftData
 import SwiftUI
 import UIKit
@@ -8,32 +9,56 @@ enum MapStyleChoice: String {
     case satellite
 }
 
-/// The app's only screen: a full-screen map with the user's position and one pin per point.
+/// The app's only screen: a full-screen map with the user's position and one pin per filtered point.
 struct MapScreen: View {
+    enum ActiveSheet: Identifiable, Hashable {
+        case add
+        case detail(UUID)
+        case filterList
+
+        var id: Self { self }
+    }
+
     @Environment(LocationManager.self) private var location
     @Environment(\.openURL) private var openURL
     @Query(sort: \Measure.createdAt, order: .reverse) private var measures: [Measure]
     @AppStorage("mapStyle") private var mapStyle = MapStyleChoice.standard.rawValue
     @State private var position: MapCameraPosition = .userLocation(fallback: .automatic)
-    @State private var isAdding = false
     /// Last settled camera region; `nil` until the map reports one.
     @State private var visibleRegion: MKCoordinateRegion?
+    @State private var selectedID: UUID?
+    @State private var activeSheet: ActiveSheet?
+    /// Not persisted: every launch starts on All.
+    @State private var filterKind = FilterKind.all
+    @State private var customRange = CustomRange(from: .now, to: .now, calendar: .current)
 
-    /// Pin titles show only at or below this latitude span. Replaced by the Core label rule in task-3.1.
-    private let detailedPinLatitudeDelta = 0.01
+    private let signposter = OSSignposter(subsystem: Bundle.main.bundleIdentifier ?? "FieldMeasures", category: .pointsOfInterest)
 
     private var isSatellite: Bool { mapStyle == MapStyleChoice.satellite.rawValue }
 
+    private var filter: DateFilter { filterKind.filter(custom: customRange) }
+
+    /// The one filtered array that feeds the pins, the list and the export.
+    private var filteredMeasures: [Measure] {
+        let filter = filter
+        guard !filter.isAll else { return measures }
+        let now = Date.now
+        let calendar = Calendar.current
+        return measures.filter { filter.matches($0.createdAt, now: now, calendar: calendar) }
+    }
+
     var body: some View {
-        Map(position: $position) {
+        let filtered = filteredMeasures
+        Map(position: $position, selection: $selectedID) {
             UserAnnotation()
-            ForEach(visibleMeasures) { measure in
+            ForEach(visibleMeasures(in: filtered)) { measure in
                 Marker(
-                    measure.text,
+                    pinLabel(for: measure.text),
                     coordinate: CLLocationCoordinate2D(latitude: measure.latitude, longitude: measure.longitude)
                 )
                 .tint(.red)
-                .annotationTitles(showsDetailedPins ? .visible : .hidden)
+                .annotationTitles(showsPinLabels ? .visible : .hidden)
+                .tag(measure.id)
             }
         }
         .onMapCameraChange(frequency: .onEnd) { context in
@@ -53,17 +78,42 @@ struct MapScreen: View {
         .safeAreaInset(edge: .bottom) {
             toolbar
         }
-        .sheet(isPresented: $isAdding) {
-            AddMeasureSheet()
+        .onChange(of: selectedID) { _, id in
+            if let id {
+                activeSheet = .detail(id)
+            }
+        }
+        .onChange(of: filter) {
+            let interval = signposter.beginInterval("FilterChange")
+            Task { @MainActor in
+                signposter.endInterval("FilterChange", interval)
+            }
+        }
+        .sheet(item: $activeSheet, onDismiss: { selectedID = nil }) { sheet in
+            switch sheet {
+            case .add:
+                AddMeasureSheet()
+            case .detail(let id):
+                if let measure = measures.first(where: { $0.id == id }) {
+                    MeasureDetailSheet(measure: measure)
+                }
+            case .filterList:
+                FilterListSheet(
+                    filterKind: $filterKind,
+                    customRange: $customRange,
+                    measures: filtered,
+                    onSelect: center(on:)
+                )
+            }
         }
     }
 
-    private var showsDetailedPins: Bool {
-        (visibleRegion?.span.latitudeDelta ?? .infinity) <= detailedPinLatitudeDelta
+    private var showsPinLabels: Bool {
+        visibleRegion.map { showsLabels(latitudeDelta: $0.span.latitudeDelta) } ?? false
     }
 
-    /// Points inside the visible region plus half a span of margin, so panning doesn't reveal empty edges.
-    private var visibleMeasures: [Measure] {
+    /// Points inside the visible region plus half a span of margin on each side.
+    private func visibleMeasures(in filtered: [Measure]) -> [Measure] {
         guard let region = visibleRegion else { return [] }
         let box = CoordinateBox(
             centerLatitude: region.center.latitude,
@@ -72,7 +122,17 @@ struct MapScreen: View {
             longitudeDelta: region.span.longitudeDelta,
             scale: 2
         )
-        return measures.filter { box.contains(latitude: $0.latitude, longitude: $0.longitude) }
+        return filtered.filter { box.contains(latitude: $0.latitude, longitude: $0.longitude) }
+    }
+
+    /// Centres the map on a point, keeping the current zoom.
+    private func center(on measure: Measure) {
+        activeSheet = nil
+        let span = visibleRegion?.span ?? MKCoordinateSpan(latitudeDelta: 0.005, longitudeDelta: 0.005)
+        position = .region(MKCoordinateRegion(
+            center: CLLocationCoordinate2D(latitude: measure.latitude, longitude: measure.longitude),
+            span: span
+        ))
     }
 
     private var toolbar: some View {
@@ -84,10 +144,20 @@ struct MapScreen: View {
             }
             .accessibilityLabel(isSatellite ? "Show standard map" : "Show satellite map")
 
+            Button {
+                activeSheet = .filterList
+            } label: {
+                Image(systemName: filter.isAll
+                    ? "line.3.horizontal.decrease.circle"
+                    : "line.3.horizontal.decrease.circle.fill")
+            }
+            .accessibilityLabel("Filter and list")
+            .accessibilityValue(filter.isAll ? "All points" : "Filter active")
+
             Spacer()
 
             Button {
-                isAdding = true
+                activeSheet = .add
             } label: {
                 Image(systemName: "plus")
                     .font(.title2.weight(.semibold))
