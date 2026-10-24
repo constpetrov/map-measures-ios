@@ -15,6 +15,7 @@ struct MapScreen: View {
         case add
         case detail(UUID)
         case filterList
+        case export
 
         var id: Self { self }
     }
@@ -104,6 +105,8 @@ struct MapScreen: View {
                     measures: filtered,
                     onSelect: center(on:)
                 )
+            case .export:
+                ExportSheet(measures: filtered)
             }
         }
     }
@@ -153,6 +156,14 @@ struct MapScreen: View {
             }
             .accessibilityLabel("Filter and list")
             .accessibilityValue(filter.isAll ? "All points" : "Filter active")
+
+            Button {
+                activeSheet = .export
+            } label: {
+                Image(systemName: "square.and.arrow.up")
+            }
+            .disabled(filteredMeasures.isEmpty)
+            .accessibilityLabel("Export")
 
             Spacer()
 

@@ -2,8 +2,8 @@
 
 ## Current
 
-- Task: task-4.1
-- Status: NOT_STARTED
+- Task: (all tasks done)
+- Status: COMPLETE, with 6 manual checks open for the user
 
 ## Completed
 
@@ -24,13 +24,16 @@
 - task-3.2
 - task-3.3
 - task-3.4
+- task-4.1
+- task-4.2
+- task-4.3
 
 ## Phase Approvals
 
 - phase-1: APPROVED
 - phase-2: COMPLETE (cp-2 passed; no approval stop, per user instruction at cp-1)
 - phase-3: COMPLETE (cp-3 passed; continuing per user instruction)
-- phase-4: PENDING
+- phase-4: COMPLETE. cp-4 is partly met: 6 rows in docs/manual-checklist.md need the user (iOS 17.0 mouse tap-through, AC-107 timing, zoom labels, low-accuracy and no-fix on screen, device install)
 
 ## Blockers
 
@@ -80,3 +83,6 @@
 - phase-3 bug found and fixed: the scratch delete context autosaved its pending delete after an injected save failure, so a failed delete was persisted later. Fixed with `scratch.autosaveEnabled = false`. Regression tests wait 2 s before checking the store; without the fix the suite fails.
 - phase-3 not automatable: the map can't be zoomed with AXe (double taps don't register as a zoom), so seeing labels appear at a span of 0.01 or less is on the manual checklist. The threshold logic is covered by PointLabelTests. On iOS 27, `confirmationDialog` shows as a popover with only "Delete"; tapping outside cancels.
 - UI driving: accessibility frames for map markers and list rows are sometimes offset by about a row on the iOS 27 simulator. `findred.py` (scratchpad) locates markers in screenshots instead.
+- task-4.1: The export sheet shows the format (GPX preselected), the point count and the file name. Export writes through `Persistence.writeExport`, then presents `ActivityView` (UIActivityViewController). File names use a Gregorian calendar in the current time zone. On iOS 27: the Today filter exported exactly the listed point; the CSV starts with EF BB BF and uses CRLF and +02:00 local times; `-FailExportWrite` shows the alert with no share sheet; Export is disabled for an empty filter.
+- task-4.3: `xmllint --schema` against the official GPX 1.1 XSD (downloaded to the scratchpad only): the unit-test sample and a real 40-waypoint export both validate. AC-103 and AC-104 grep checks are clean. FilterChange signposts are verified (25 ms for All → 7 Days with 40 points on iOS 27).
+- task-4.3 / AC-107 not measurable with automation: any AXe interaction makes AXe an accessibility client, and with 3,000 markers on screen `MKMapViewAccessibility accessibilityElements` (O(n²), sampled) holds the main thread at 99% CPU. That means the task-1.7 pan timings were also inflated by the tooling. The idle app sits at 0% CPU. Without an accessibility client the real cost is unknown, so the user measures it by hand (procedure in docs/manual-checklist.md). VoiceOver users with thousands of points on screen would hit the same MapKit cost.
