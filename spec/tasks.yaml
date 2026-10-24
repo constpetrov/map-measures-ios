@@ -1,0 +1,293 @@
+tasks:
+  feature: "Field Measures"
+  review_verdict: "PASS"
+  organizing_principle: "walking_skeleton"
+  assumptions:
+    - "An 'iPhone 15' simulator device exists for the iOS 17.0 runtime. Tests run with: xcodegen generate && xcodebuild test -project FieldMeasures.xcodeproj -scheme FieldMeasures -destination 'platform=iOS Simulator,OS=17.0,name=iPhone 15'. If the name differs, use any iPhone on the iOS 17.0 runtime."
+    - "The repository contains only spec/ and LICENSE. Every path below is new."
+    - "Device install (Local.xcconfig with DEVELOPMENT_TEAM) is done by the user and is not part of any task's validation."
+  decisions:
+    - id: dec-1
+      decision: "Organize as a walking skeleton: an add-and-see-pin slice first, then pure Core logic, then the remaining map features, then export and manual verification."
+      reason: "The riskiest parts are integration ones: Swift 6 location delegate isolation, Map performance with 3,000 pins, and SwiftData rollback on iOS 17.0. The skeleton reaches all three in phase 1, so problems surface before features are built on top."
+      alternatives: ["risk_first (similar order but no runnable app until later)", "layered (Core first; delays every integration risk)"]
+    - id: dec-2
+      decision: "Seed 3,000 points and check map smoothness in phase 1 (task-1.7). The formal AC-107 measurement comes in phase 4, once filters exist."
+      reason: "Review Risk Hotspot 1. If SwiftUI Map with Annotations is too slow, pin rendering must change before labels, the detail sheet and filters are built on it."
+      alternatives: ["Measure only at the end (risk of rework)"]
+    - id: dec-3
+      decision: "The text-validation and accuracy-threshold Core helpers are built inside task-1.6 (add sheet), not in phase 2."
+      reason: "The skeleton's add flow needs them, and they're two small functions with their own tests."
+      alternatives: ["A separate phase-2 task, which would leave the skeleton without validation"]
+    - id: dec-4
+      decision: "Phase 1 has 7 tasks, at the soft limit."
+      reason: "The skeleton covers scaffolding, model, persistence, location, map, add flow and debug seams. Each is a separate rollback unit, and merging any two would mix integration risks."
+      alternatives: ["Split phase 1 into two phases (adds a checkpoint without reducing risk)"]
+  coverage_deferrals: []
+  phases:
+    - id: phase-1
+      name: "Walking skeleton"
+      description: "Scaffold the project and deliver the thinnest end-to-end slice: launch, grant location, see the map, add a point at the current position, see its pin, and keep it after a relaunch. Also add the debug failure and seeding switches."
+      covers: [AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11, AC-12, AC-13, AC-14, AC-15, AC-16, AC-17, AC-18, AC-19, AC-20, AC-21, AC-22, AC-23, AC-24, AC-25, AC-26, AC-27, AC-28, AC-29, AC-30, AC-31, AC-32, AC-48, AC-52, AC-102, AC-106]
+      entry_criteria: "spec/review.md verdict is PASS. Xcode 27.1, XcodeGen and the iOS 17.0 simulator runtime are installed."
+      tasks:
+        - id: task-1.1
+          name: "Project scaffolding"
+          description: "Create project.yml with app target FieldMeasures and unit-test target FieldMeasuresTests. Settings: iOS 17.0, iPhone only, Swift 6, SWIFT_DEFAULT_ACTOR_ISOLATION=MainActor, NSLocationWhenInUseUsageDescription text from RULE-23, and no background modes. Reference Local.xcconfig as optional and check in Local.xcconfig.example. Add a .gitignore covering FieldMeasures.xcodeproj, Local.xcconfig and build products. Create the folder layout from RULE-4 and a placeholder FieldMeasuresApp that shows an empty view. Add a short README section with the setup steps (xcodegen generate, Local.xcconfig for device install)."
+          artifact: "project.yml, .gitignore, Local.xcconfig.example, README.md, FieldMeasures/App/FieldMeasuresApp.swift"
+          covers:
+            acs: [AC-106]
+            rules: [RULE-1, RULE-2, RULE-3, RULE-4, RULE-22, RULE-23, RULE-36]
+          depends_on: []
+          complexity: "S"
+          validation: "xcodegen generate succeeds. xcodebuild build for the iOS 17.0 simulator succeeds with zero warnings about isolation. The generated Info.plist contains NSLocationWhenInUseUsageDescription and no UIBackgroundModes. git status does not list FieldMeasures.xcodeproj."
+        - id: task-1.2
+          name: "Measure model and container"
+          description: "Add @Model final class Measure with id (unique UUID), createdAt, latitude, longitude, altitude (optional), accuracy and text. Do not add a VersionedSchema. Create the ModelContainer in FieldMeasuresApp and attach it to the window group."
+          artifact: "FieldMeasures/Model/Measure.swift, FieldMeasures/App/FieldMeasuresApp.swift"
+          covers:
+            acs: [AC-26, AC-27, AC-28]
+            rules: [RULE-7, RULE-8]
+          depends_on: [task-1.1]
+          complexity: "S"
+          validation: "The project builds. The model has no property named description and has no VersionedSchema or SchemaMigrationPlan anywhere."
+        - id: task-1.3
+          name: "Persistence helper with injectable failures"
+          description: "Add Persistence with commit(_:in:), which applies a change, calls an injectable save function (default context.save()), and rolls back and rethrows on failure. Add writeExport(_:named:), which writes Data atomically to temporaryDirectory/<UUID>/<name> through an injectable write function and returns the URL. Add tests: (a) an on-disk store in a temp directory, reopened with a new container, compares all fields; (b) a throwing save on insert, edit and delete leaves the store in its pre-change state; (c) a throwing write propagates the error; (d) two inserted points have different ids."
+          artifact: "FieldMeasures/Model/Persistence.swift, FieldMeasuresTests/PersistenceTests.swift"
+          covers:
+            acs: [AC-28, AC-31, AC-32, AC-48, AC-52, AC-102]
+            rules: [RULE-9, RULE-29, RULE-31]
+          depends_on: [task-1.2]
+          complexity: "M"
+          validation: "xcodebuild test on the iOS 17.0 simulator. All PersistenceTests pass."
+          risk: "Review hotspot 4: SwiftData rollback on iOS 17.0 may not refresh @Query. These tests must run on the 17.0 runtime, not only the newest."
+        - id: task-1.4
+          name: "LocationManager"
+          description: "Add the @Observable LocationManager wrapping a CLLocationManager created on the main thread, with desiredAccuracy best. Requirements: request When In Use authorization only when the status is notDetermined; expose an isAccessOff flag (denied or restricted); expose the latest fix, ignoring horizontalAccuracy < 0; set altitude to nil when verticalAccuracy < 0; react to authorization changes. Never call locationServicesEnabled() on the main actor. Own the manager in the app and inject it through the environment."
+          artifact: "FieldMeasures/Location/LocationManager.swift"
+          covers:
+            acs: [AC-1, AC-2, AC-10, AC-24, AC-25]
+            rules: [RULE-19, RULE-20, RULE-22]
+          depends_on: [task-1.1]
+          complexity: "M"
+          validation: "Builds under Swift 6 strict concurrency with no errors or isolation warnings. On the simulator: a first launch after `xcrun simctl privacy booted reset location` shows the permission prompt, and a second launch does not."
+          risk: "Review hotspot 3: CLLocationManagerDelegate under MainActor-default isolation needs an isolated conformance or nonisolated methods that hop to the main actor. Build this file before any view depends on it."
+        - id: task-1.5
+          name: "Map screen skeleton"
+          description: "Build MapScreen with Map(position:) starting at .userLocation(fallback: .automatic), the user location annotation, MapUserLocationButton, and a standard/satellite toggle stored in @AppStorage(\"mapStyle\"). Show one pin per stored point (no filter or labels yet), using @Query sorted by createdAt descending. Disable the + button and show the 'Location access is off' banner with an Open Settings button (openSettingsURLString) while access is off."
+          artifact: "FieldMeasures/Views/MapScreen.swift"
+          covers:
+            acs: [AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9]
+            rules: [RULE-11, RULE-13, RULE-18, RULE-19, RULE-34]
+          depends_on: [task-1.2, task-1.4]
+          complexity: "M"
+          validation: "Simulator with a custom location: the map centres on it, the location button recentres, and the style toggle survives a relaunch. With location denied in Settings, + is disabled, the banner shows, and Open Settings opens the app's Settings page."
+        - id: task-1.6
+          name: "Add point sheet"
+          description: "Add Core helpers isValidDescription(_:) (trimmed whitespace and newlines must be non-empty) and lowAccuracyThreshold = 20 with isLowAccuracy(_:) (> 20), declared nonisolated, with tests at 15, 20 and 21 m and for empty, whitespace-only and one-character text. Build AddMeasureSheet showing live lat/lon/accuracy or 'Waiting for GPS…', the orange 'Low accuracy (±N m)' warning, a multiline description field, Save (enabled only with a fix and valid text, independent of the warning) and Cancel. Save inserts through Persistence.commit with the latest fix and createdAt = now, then closes. On failure it shows 'Could not save point' and keeps the text."
+          artifact: "FieldMeasures/Core/TextRules.swift, FieldMeasures/Core/AccuracyRules.swift, FieldMeasures/Views/AddMeasureSheet.swift, FieldMeasuresTests/TextRulesTests.swift, FieldMeasuresTests/AccuracyRulesTests.swift"
+          covers:
+            acs: [AC-11, AC-12, AC-13, AC-14, AC-15, AC-16, AC-17, AC-18, AC-19, AC-20, AC-21, AC-22, AC-23, AC-24, AC-25, AC-26, AC-27, AC-29, AC-30, AC-32]
+            rules: [RULE-5, RULE-9, RULE-15, RULE-20, RULE-21, RULE-30, RULE-31]
+          depends_on: [task-1.3, task-1.4, task-1.5]
+          complexity: "M"
+          validation: "Unit tests pass. Simulator: add a point at a custom location, its pin appears, and it's still there after a relaunch. Cancel stores nothing. Save is disabled for empty and whitespace-only text."
+        - id: task-1.7
+          name: "Debug options and early performance probe"
+          description: "Add DebugOptions, compiled only under #if DEBUG, reading the -FailSaves, -FailExportWrite and -SeedPoints <n> launch arguments. The fail flags swap Persistence's save or write function for one that throws. SeedPoints inserts n points spread evenly over the last 30 days within about 1 km of the simulated location, only when the store is empty. Declare a scheme variant or launch arguments in project.yml (disabled by default). Run once with -SeedPoints 3000 and pan and zoom the map."
+          artifact: "FieldMeasures/App/DebugOptions.swift, project.yml (scheme arguments), a short note in README.md on the flags"
+          covers:
+            acs: [AC-32]
+            rules: [RULE-38]
+          depends_on: [task-1.3, task-1.5]
+          complexity: "S"
+          validation: "A Release build contains no reference to the flags (grep the built binary's strings for 'FailSaves', expect none). With -FailSaves, adding a point shows 'Could not save point' and no pin appears. With -SeedPoints 3000, 3,000 pins render and panning stays usable."
+          risk: "Review hotspot 1: a SwiftUI Map with 3,000 Annotations may stall. If panning or rendering is clearly slow here, switch the pin rendering before phase 3 (draw only points in the visible region, or use Marker when zoomed out) and record the change."
+          source: "review/MAJOR-2, review/MAJOR-3 (resolved upstream; seams implemented here)"
+      checkpoint:
+        id: cp-1
+        description: "The skeleton runs end to end on the iOS 17.0 simulator and the main integration risks are known."
+        criteria:
+          - "All unit tests pass on the iOS 17.0 simulator."
+          - "A point added at a custom simulated location appears as a pin and survives a relaunch."
+          - "The project compiles in Swift 6 mode with no concurrency errors in LocationManager."
+          - "-FailSaves shows the alert and stores nothing."
+          - "The 3,000-pin probe outcome is recorded: either acceptable, or the pin rendering was changed."
+
+    - id: phase-2
+      name: "Core logic"
+      description: "Build the pure, nonisolated Core functions for filtering, the custom range, labels and export formats, with unit tests at every boundary."
+      covers: [AC-38, AC-39, AC-40, AC-41, AC-55, AC-56, AC-57, AC-58, AC-59, AC-60, AC-61, AC-62, AC-63, AC-64, AC-65, AC-79, AC-80, AC-81, AC-82, AC-83, AC-84, AC-85, AC-86, AC-87, AC-88, AC-89, AC-90, AC-91, AC-92, AC-93, AC-94, AC-95, AC-96, AC-97, AC-98, AC-99, AC-100, AC-101, AC-108, AC-109, AC-110, AC-111]
+      entry_criteria: "cp-1 approved."
+      tasks:
+        - id: task-2.1
+          name: "DateFilter"
+          description: "Add a DateFilter enum (all, today, last7Days, custom(CustomRange)) and an interval function taking now and calendar. It returns nil for All, otherwise a half-open [start, endExclusive) built with startOfDay and date(byAdding: .day). Add matches(_:) for a Date. Tests use a fixed calendar, time zone and now, at every boundary in AC-56 to AC-64, plus a daylight-saving transition day."
+          artifact: "FieldMeasures/Core/DateFilter.swift, FieldMeasuresTests/DateFilterTests.swift"
+          covers:
+            acs: [AC-55, AC-56, AC-57, AC-58, AC-59, AC-60, AC-61, AC-62, AC-63, AC-64]
+            rules: [RULE-5, RULE-6, RULE-14, RULE-31]
+          depends_on: [task-1.1]
+          complexity: "M"
+          validation: "DateFilterTests pass, including the daylight-saving case. Core contains no Date(), Calendar.current or TimeZone.current."
+        - id: task-2.2
+          name: "CustomRange"
+          description: "Add the CustomRange value type storing from and to as calendar.startOfDay, changed only through settingFrom(_:calendar:) (moves To up to From when From's day is after To's day) and settingTo(_:calendar:) (ignores a To before From's day). Tests: From one day before To, From equal to To, and From the day after To. Also To before From, and From and To on the same day with different times."
+          artifact: "FieldMeasures/Core/CustomRange.swift, FieldMeasuresTests/CustomRangeTests.swift"
+          covers:
+            acs: [AC-65, AC-108, AC-109, AC-110]
+            rules: [RULE-5, RULE-6, RULE-14, RULE-37, RULE-31]
+          depends_on: [task-2.1]
+          complexity: "S"
+          validation: "CustomRangeTests pass. No code path builds a DateInterval with end before start."
+          risk: "Review hotspot 2: DatePicker values carry a time of day. Store the start of the day and test the same day with different times."
+        - id: task-2.3
+          name: "Labels and GPX names"
+          description: "Add pinLabel(for:) (newlines become spaces, the first 12 Characters, plus '…' when the original is longer), gpxName(for:) (same, without the ellipsis), and showsLabels(latitudeDelta:) (<= 0.01, with the threshold as a named constant). Tests: 11, 12 and 13 characters; \\n and \\r\\n line breaks; an emoji counted as one character; spans of 0.005, 0.01 and 0.02."
+          artifact: "FieldMeasures/Core/PointLabel.swift, FieldMeasuresTests/PointLabelTests.swift"
+          covers:
+            acs: [AC-38, AC-39, AC-40, AC-41]
+            rules: [RULE-5, RULE-16, RULE-17, RULE-31]
+          depends_on: [task-1.1]
+          complexity: "S"
+          validation: "PointLabelTests pass."
+        - id: task-2.4
+          name: "ExportPoint and GPXWriter"
+          description: "Add an ExportPoint value (id, createdAt, lat, lon, altitude?, accuracy, text). GPXWriter.data(for:) sorts by createdAt ascending and emits GPX 1.1 with children in schema order ele?, time (UTC ISO 8601 ending in Z), name (gpxName), desc, using one XML-escape function (& first), POSIX number formatting (6 decimals for lat/lon, 1 for ele) and no BOM. Tests: shuffled input comes out oldest first; ele is omitted when altitude is nil; name at 11, 12 and 13 characters and with line breaks; all five escapable characters round-trip through XMLParser; output under a de_DE locale still uses dot decimals."
+          artifact: "FieldMeasures/Core/ExportPoint.swift, FieldMeasures/Core/GPXWriter.swift, FieldMeasuresTests/GPXWriterTests.swift"
+          covers:
+            acs: [AC-79, AC-80, AC-81, AC-82, AC-83, AC-84, AC-85, AC-86, AC-87, AC-88, AC-89, AC-96, AC-99]
+            rules: [RULE-5, RULE-6, RULE-16, RULE-25, RULE-26, RULE-27, RULE-31, RULE-33]
+          depends_on: [task-2.3]
+          complexity: "M"
+          validation: "GPXWriterTests pass. A sample output saved during the test is kept for the xmllint schema check in task-4.3."
+          risk: "Review hotspot 5: the query is newest first but files must be oldest first. The writer sorts its input itself."
+        - id: task-2.5
+          name: "CSVWriter"
+          description: "CSVWriter.data(for:timeZone:) sorts ascending and returns Data starting with EF BB BF, then the header from AC-90, then one row per point ending in \\r\\n. Fields: created_at_utc (Z), created_at_local (offset for the injected time zone), lat and lon with 6 decimals, altitude with 1 decimal or empty, accuracy rounded to whole metres, and the description quoted only when it contains , \" \\r or \\n, with inner quotes doubled. Tests: the first 3 bytes; the header; quoting cases; a round trip through a small RFC 4180 parser in the test target; a de_DE locale; Europe/Berlin and UTC time zones."
+          artifact: "FieldMeasures/Core/CSVWriter.swift, FieldMeasuresTests/CSVWriterTests.swift"
+          covers:
+            acs: [AC-79, AC-90, AC-91, AC-92, AC-93, AC-94, AC-95, AC-96, AC-97, AC-98, AC-99, AC-111]
+            rules: [RULE-5, RULE-6, RULE-25, RULE-26, RULE-28, RULE-31]
+          depends_on: [task-2.4]
+          complexity: "M"
+          validation: "CSVWriterTests pass."
+        - id: task-2.6
+          name: "Export file name"
+          description: "Add exportFileName(for:format:calendar:), which returns measures_<earliest>_<latest>.<ext>, or measures_<date>.<ext> when all points fall on one local date, with zero-padded yyyy-MM-dd from dateComponents. Tests: one date, two dates, unsorted input, and a point near midnight in a non-UTC time zone."
+          artifact: "FieldMeasures/Core/ExportFileName.swift, FieldMeasuresTests/ExportFileNameTests.swift"
+          covers:
+            acs: [AC-100, AC-101]
+            rules: [RULE-5, RULE-6, RULE-26, RULE-31]
+          depends_on: [task-2.4]
+          complexity: "S"
+          validation: "ExportFileNameTests pass."
+      checkpoint:
+        id: cp-2
+        description: "All Core logic is complete and tested at every boundary from the criteria."
+        criteria:
+          - "The full unit-test suite passes on the iOS 17.0 simulator."
+          - "Nothing under FieldMeasures/Core imports SwiftUI, SwiftData, CoreLocation or MapKit (checked with grep)."
+          - "Nothing under FieldMeasures/Core reads Date(), Calendar.current or TimeZone.current (checked with grep)."
+
+    - id: phase-3
+      name: "Map features"
+      description: "Connect Core to the UI: pin labels, the point detail with edit and delete, the date filter and the list."
+      covers: [AC-33, AC-34, AC-35, AC-36, AC-37, AC-42, AC-43, AC-44, AC-45, AC-46, AC-47, AC-48, AC-49, AC-50, AC-51, AC-52, AC-53, AC-54, AC-66, AC-67, AC-68, AC-69, AC-70, AC-71, AC-72, AC-73, AC-74]
+      entry_criteria: "cp-2 approved."
+      tasks:
+        - id: task-3.1
+          name: "Pin labels and pin tap"
+          description: "Track the visible latitudeDelta with onMapCameraChange(frequency: .onEnd). Show pinLabel under each pin only when showsLabels(latitudeDelta:) is true. A pin tap opens the point detail sheet with the full description and the date (medium date, short time)."
+          artifact: "FieldMeasures/Views/MapScreen.swift, FieldMeasures/Views/MeasureDetailSheet.swift (read-only view)"
+          covers:
+            acs: [AC-35, AC-36, AC-37, AC-42, AC-43]
+            rules: [RULE-17, RULE-18]
+          depends_on: [task-1.6, task-2.3]
+          complexity: "S"
+          validation: "Simulator: labels appear when zoomed in to street level and disappear when zoomed out to city level. Tapping a pin shows the full text and date."
+          risk: "Review hotspot 1: label views multiply the Annotation cost. Re-run -SeedPoints 3000 after this task."
+        - id: task-3.2
+          name: "Edit and delete in detail"
+          description: "In MeasureDetailSheet, edit the description in a local @State draft, with Save disabled for invalid text. Save assigns the draft to text inside Persistence.commit; on failure it shows 'Could not save changes' and keeps the draft. Delete asks through confirmationDialog. Confirming commits the delete and closes the sheet; declining keeps the point. A delete failure shows 'Could not delete point'."
+          artifact: "FieldMeasures/Views/MeasureDetailSheet.swift"
+          covers:
+            acs: [AC-44, AC-45, AC-46, AC-47, AC-48, AC-49, AC-50, AC-51, AC-52]
+            rules: [RULE-9, RULE-10, RULE-15, RULE-30, RULE-35]
+          depends_on: [task-3.1, task-1.3]
+          complexity: "M"
+          validation: "Simulator: an edit is saved, the label updates, and the position and date are unchanged. Cancelling delete keeps the point; confirming removes the pin. With -FailSaves, the edit shows its alert, the pin's label keeps the old text and the draft remains, and the delete shows its alert with the pin still present."
+          risk: "Review hotspot 4: confirm on the 17.0 runtime that the pin and label refresh after a rollback."
+        - id: task-3.3
+          name: "Date filter UI"
+          description: "Hold the DateFilter in @State on MapScreen (default All, not persisted) and derive one filtered array that feeds the pins, the list and the export. Build the filter section of FilterListSheet with All, Today, Last 7 days and Custom. Custom has From and To DatePickers (date only) bound through CustomRange, with the To picker using in: from... The toolbar filter icon is filled when the filter is not All. A filter change must not touch the camera position. Wrap filter changes in an OSSignposter 'FilterChange' interval."
+          artifact: "FieldMeasures/Views/MapScreen.swift, FieldMeasures/Views/FilterListSheet.swift"
+          covers:
+            acs: [AC-33, AC-34, AC-53, AC-54, AC-66, AC-67, AC-68, AC-69]
+            rules: [RULE-11, RULE-12, RULE-14, RULE-18, RULE-37, RULE-39]
+          depends_on: [task-2.1, task-2.2, task-3.1]
+          complexity: "M"
+          validation: "Simulator with -SeedPoints 3000: Today, Last 7 days and Custom each change the pin count and leave the camera where it was. The filter icon is filled except on All. A relaunch shows All. Moving From past To moves To."
+        - id: task-3.4
+          name: "Point list"
+          description: "Add the list to FilterListSheet, showing filtered points newest first with the description and date. Swipe-to-delete commits without confirmation, with the failure alert. A row tap closes the sheet and centres the map on the point, keeping the last observed span. With no matching points it shows 'No points for this filter'."
+          artifact: "FieldMeasures/Views/FilterListSheet.swift, FieldMeasures/Views/MapScreen.swift"
+          covers:
+            acs: [AC-70, AC-71, AC-72, AC-73, AC-74]
+            rules: [RULE-9, RULE-11, RULE-18, RULE-30, RULE-35]
+          depends_on: [task-3.3, task-1.3]
+          complexity: "S"
+          validation: "Simulator: rows are ordered newest first; swiping deletes the row and its pin; tapping a row centres the map without changing the zoom; an empty custom range shows the message."
+      checkpoint:
+        id: cp-3
+        description: "All map, filter, list and detail behaviour works on the simulator."
+        criteria:
+          - "The unit-test suite is still green."
+          - "Each phase-3 task's validation steps have been carried out on the iOS 17.0 simulator."
+          - "The 3,000-pin probe with labels is still usable when panning."
+
+    - id: phase-4
+      name: "Export and verification"
+      description: "Add the export flow, write the manual checklist, and run it, including the AC-107 timing and the GPX schema check."
+      covers: [AC-75, AC-76, AC-77, AC-78, AC-102, AC-103, AC-104, AC-105, AC-107]
+      entry_criteria: "cp-3 approved."
+      tasks:
+        - id: task-4.1
+          name: "Export sheet and share"
+          description: "Add ExportSheet with a GPX/CSV choice (GPX preselected). The toolbar export action is disabled when the filtered array is empty. Confirming maps the filtered points to ExportPoint, builds the data with the chosen writer, names the file with exportFileName, and writes it through Persistence.writeExport. On success it presents ActivityView (a UIActivityViewController wrapper) with the file URL. On failure it shows 'Could not create export file' and doesn't present. Don't use ShareLink."
+          artifact: "FieldMeasures/Views/ExportSheet.swift, FieldMeasures/Views/ActivityView.swift, FieldMeasures/Views/MapScreen.swift"
+          covers:
+            acs: [AC-75, AC-76, AC-77, AC-78, AC-102]
+            rules: [RULE-11, RULE-29, RULE-30]
+          depends_on: [task-2.4, task-2.5, task-2.6, task-3.3, task-1.7]
+          complexity: "M"
+          validation: "Simulator: with the Today filter, export the GPX to Files and confirm it contains only today's points. The CSV opens in Numbers with correct columns. Export is disabled for an empty filter. With -FailExportWrite, the alert shows and no share sheet appears."
+        - id: task-4.2
+          name: "Manual checklist"
+          description: "Write docs/manual-checklist.md listing every AC not fully proven by unit tests, each with simulator or device steps. Include: the simctl privacy reset for AC-1 and AC-2; custom-location setup; the -FailSaves and -FailExportWrite alert checks; xmllint --schema against the GPX 1.1 XSD (downloaded to a scratch folder, not committed); a grep for URLSession and Network imports (AC-103); the background check for AC-104; and the AC-107 procedure (launch with -SeedPoints 3000 on iOS 17.0, Instruments Points of Interest, read the FilterChange interval for All to Last 7 days, pass at under 1 s)."
+          artifact: "docs/manual-checklist.md"
+          covers:
+            acs: [AC-103, AC-104, AC-107]
+            rules: [RULE-32, RULE-39, RULE-24]
+          depends_on: [task-4.1]
+          complexity: "S"
+          validation: "Every AC named in RULE-32's Covers line appears in the checklist with at least one step."
+        - id: task-4.3
+          name: "Run the checklist on iOS 17.0"
+          description: "Run every checklist item on the iOS 17.0 simulator and record pass or fail with the date in the checklist. Run xmllint on the GPX sample from task-2.4 and on one real export. Record the measured AC-107 time."
+          artifact: "docs/manual-checklist.md (results column filled)"
+          covers:
+            acs: [AC-103, AC-104, AC-105, AC-107]
+            rules: [RULE-32, RULE-33, RULE-39]
+          depends_on: [task-4.2]
+          complexity: "M"
+          validation: "Every checklist row has a result. Any failure becomes a fix in a follow-up task before cp-4 is approved."
+          risk: "Review hotspots 1 and 4 are verified for the last time here: the 3,000-point timing and the pin refresh after rollback on iOS 17.0."
+      checkpoint:
+        id: cp-4
+        description: "The feature is complete and verified."
+        criteria:
+          - "The unit-test suite passes on the iOS 17.0 simulator."
+          - "Every manual checklist row passes, including the GPX schema validation and AC-107 under 1 s."
+          - "The app is ready for the user to install on an iPhone via Xcode after setting Local.xcconfig."
