@@ -2,7 +2,7 @@
 
 ## Current
 
-- Task: task-2.1
+- Task: task-3.1
 - Status: NOT_STARTED
 
 ## Completed
@@ -14,11 +14,17 @@
 - task-1.5
 - task-1.6
 - task-1.7
+- task-2.1
+- task-2.2
+- task-2.3
+- task-2.4
+- task-2.5
+- task-2.6
 
 ## Phase Approvals
 
 - phase-1: APPROVED
-- phase-2: PENDING
+- phase-2: COMPLETE (cp-2 passed; no approval stop, per user instruction at cp-1)
 - phase-3: PENDING
 - phase-4: PENDING
 
@@ -47,3 +53,7 @@
 - task-1.6: Verified on iOS 27: Save is disabled when empty and when whitespace-only, and enabled with text. Saving closes the sheet and the pin appears and survives a relaunch. Cancel stores nothing (SQLite row count unchanged). The low-accuracy warning isn't visible in the simulator (accuracy is always ±5 m), so its boundary is covered by AccuracyRulesTests and the visual check goes on the manual checklist.
 - task-1.7: DebugOptions and the Release exclusion work: no flag strings in the Release binary. `-FailSaves` shows "Could not save point", keeps the sheet and text, adds no row, and leaves no stray pin after Cancel. `-SeedPoints 3000` inserts 3,000 rows on both iOS 17.0 and iOS 27. A `-SeedCenter <lat>,<lon>` flag (default Berlin) was added because no location fix exists yet at launch.
 - task-1.7: Pins are currently native `Marker`s for only the points inside 2× the visible region (`Core/CoordinateBox`, tested). Titles are visible at a latitude span of 0.01 or less. That's the second attempt, kept pending the blocker decision. Memory with 3,000 points: about 690 MB (Markers) vs about 830 MB (SwiftUI Annotations).
+- cp-2: 71/71 tests pass on iOS 17.0. Core has no SwiftUI/SwiftData/CoreLocation/MapKit/UIKit imports, no reads of Date()/.now/Calendar.current/TimeZone.current, and no DateInterval. Every Core file declares its types and functions `nonisolated`.
+- task-2.4: Export number and time formatting is shared in `ExportText` (Core/ExportPoint.swift): POSIX `String(format:locale:)` and an `ISO8601DateFormatter` built per call, so no shared non-Sendable state is needed. `ExportFileFormat` (gpx/csv) lives in the same file.
+- task-2.4: GPXWriterTests writes a sample to the simulator app's tmp folder as `fieldmeasures-sample.gpx`. The path is printed as "GPX sample: …" in the test log, for the xmllint check in task-4.3.
+- task-2.6: `exportFileName` takes a calendar. The export view must pass a Gregorian calendar with the current time zone, so a Buddhist or Japanese device calendar can't change the year in the file name.
